@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 const SHIFTS = [
   { id:"empty",   s:"·", label:"–",   bg:"transparent", border:"#E2E8F0", tc:"#D1D5DB" },
@@ -54,7 +54,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("schedule");
   const [saved,      setSaved]     = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
-  const SHEET_URL = "https://script.google.com/macros/s/AKfycbzCUbjAiKiRKENsNz8r9NCZYCxXXFqbKXIKOW0I7UO3mqGyUX0yLUBYa2XlfRz8QYgW/exec";
+  const BIN_ID     = "69ccf940aaba882197b453f4";
+  const MASTER_KEY = "$2a$10$JCjeP9gPY4mX/bZIxRdgXePiqJyDZ2KvVPZ0dR05rf85vUmm9psy6";
+  const ACCESS_KEY = "$2a$10$Tb2NOADcN531rJGdhXShbus48pgIlXgXI7VMXDvzf9FnWAkLp2meu";
+  const BIN_URL    = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
   // Modal state
   const [modal, setModal] = useState(null); // {staffId, di}
   const [taskType, setTaskType] = useState("pickup");
@@ -76,30 +79,31 @@ export default function App() {
   const getTasksForCell = (staffId, di) =>
     allTasks?.[key]?.[staffId]?.[di] || [];
 
-  // Save — localStorage + Google Sheets
+  // Save — local + Google Sheets
   useEffect(() => {
     const save = async () => {
       try {
         const payload = { staff, schedules: allSch, tasks: allTasks };
         // Local storage
-        localStorage.setItem("staff",     JSON.stringify(staff));
-        localStorage.setItem("schedules", JSON.stringify(allSch));
-        localStorage.setItem("tasks",     JSON.stringify(allTasks));
+        await window.storage.set("staff",     JSON.stringify(staff));
+        await window.storage.set("schedules", JSON.stringify(allSch));
+        await window.storage.set("tasks",     JSON.stringify(allTasks));
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
-        // Google Sheets sync via hidden iframe (bypasses CORS entirely)
+        // Save to JSONBin
         setSyncStatus("syncing");
-        const encoded = encodeURIComponent(JSON.stringify(payload));
-        const iframeUrl = `${SHEET_URL}?action=save&data=${encoded}`;
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = iframeUrl;
-        document.body.appendChild(iframe);
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-          setSyncStatus("synced");
-          setTimeout(() => setSyncStatus(""), 2000);
-        }, 3000);
+        const payload = { staff, schedules: allSch, tasks: allTasks };
+        await fetch(BIN_URL, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Master-Key": MASTER_KEY,
+            "X-Access-Key": ACCESS_KEY,
+          },
+          body: JSON.stringify(payload),
+        });
+        setSyncStatus("synced");
+        setTimeout(() => setSyncStatus(""), 2000);
       } catch(e) {
         setSyncStatus("error");
         setTimeout(() => setSyncStatus(""), 3000);
@@ -113,11 +117,16 @@ export default function App() {
     const load = async () => {
       try {
         setSyncStatus("syncing");
-        const res  = await fetch(SHEET_URL + "?action=load", { mode: "cors" });
+        const res  = await fetch(BIN_URL + "/latest", {
+          headers: {
+            "X-Master-Key": MASTER_KEY,
+            "X-Access-Key": ACCESS_KEY,
+          },
+        });
         const json = await res.json();
-        if (json.status === "ok" && json.data) {
-          const d = json.data;
-          if (d.staff)     setStaff(d.staff);
+        if (json.record) {
+          const d = json.record;
+          if (d.staff && d.staff.length > 0)     setStaff(d.staff);
           if (d.schedules) setAllSch(d.schedules);
           if (d.tasks)     setAllTasks(d.tasks);
           setSyncStatus("synced");
@@ -125,14 +134,14 @@ export default function App() {
           return;
         }
       } catch(e) {}
-      // Fallback to localStorage
+      // Fallback to local storage
       try {
-        const sr   = localStorage.getItem("staff");
-        const schr = localStorage.getItem("schedules");
-        const tkr  = localStorage.getItem("tasks");
-        if (sr)   setStaff(JSON.parse(sr));
-        if (schr) setAllSch(JSON.parse(schr));
-        if (tkr)  setAllTasks(JSON.parse(tkr));
+        const sr   = await window.storage.get("staff");
+        const schr = await window.storage.get("schedules");
+        const tkr  = await window.storage.get("tasks");
+        if (sr?.value)   setStaff(JSON.parse(sr.value));
+        if (schr?.value) setAllSch(JSON.parse(schr.value));
+        if (tkr?.value)  setAllTasks(JSON.parse(tkr.value));
         setSyncStatus("");
       } catch(e) {}
     };
