@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/bin/:path*", "destination": "https://api.jsonbin.io/v3/b/:path*" }
+  ]
+}
